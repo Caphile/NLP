@@ -1,0 +1,148 @@
+
+# -*- coding: cp949 -*-
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import re
+#import urllib.request
+from konlpy.tag import Okt
+#from tqdm import tqdm
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+
+#urllib.request.urlretrieve("https://raw.githubusercontent.com/e9t/nsmc/master/ratings_train.txt", filename="ratings_train.txt")
+#urllib.request.urlretrieve("https://raw.githubusercontent.com/e9t/nsmc/master/ratings_test.txt", filename="ratings_test.txt")
+
+train_data = pd.read_table('ratings_train.txt')
+test_data = pd.read_table('ratings_test.txt')
+
+train_data.drop_duplicates(subset=['document'], inplace=True) # document ¿­¿¡¼­ Áßº¹ÀÎ ³»¿ëÀÌ ÀÖ´Ù¸é Áßº¹ Á¦°Å
+
+print('ÃÑ »ùÇÃÀÇ ¼ö :',len(train_data))
+print(train_data.groupby('label').size().reset_index(name = 'count'))
+
+train_data = train_data.dropna(how = 'any') # Null °ªÀÌ Á¸ÀçÇÏ´Â Çà Á¦°Å
+print(train_data.isnull().values.any()) # Null °ªÀÌ Á¸ÀçÇÏ´ÂÁö È®ÀÎ
+
+train_data['document'] = train_data['document'].str.replace("[^¤¡-¤¾¤¿-¤Ó°¡-ÆR ]","")
+# ÇÑ±Û°ú °ø¹éÀ» Á¦¿ÜÇÏ°í ¸ğµÎ Á¦°Å
+train_data[:5]
+
+train_data = train_data.dropna(how = 'any')
+print(len(train_data))
+
+test_data.drop_duplicates(subset = ['document'], inplace=True) # document Áßº¹ Á¦°Å
+test_data['document'] = test_data['document'].str.replace("[^¤¡-¤¾¤¿-¤Ó°¡-ÆR ]","") # Á¤±Ô Ç¥Çö½Ä ¼öÇà
+test_data['document'].replace('', np.nan, inplace=True) # °ø¹éÀº Null °ªÀ¸·Î º¯°æ
+test_data = test_data.dropna(how='any') # Null °ª Á¦°Å
+print('ÀüÃ³¸® ÈÄ Å×½ºÆ®¿ë »ùÇÃÀÇ °³¼ö :',len(test_data))
+
+stopwords = ['ÀÇ','°¡','ÀÌ','Àº','µé','´Â','Á»','Àß','°Á','°ú','µµ','¸¦','À¸·Î','ÀÚ','¿¡','¿Í','ÇÑ','ÇÏ´Ù']
+
+okt = Okt()	# ÇüÅÂ¼Ò ºĞ¼®±â
+
+X_train = []
+k = 0
+for sentence in train_data['document']:
+    k = k+1
+    if k % 5000 == 0: print(k)
+    temp_X = []
+    temp_X = okt.morphs(sentence, stem=True) # ÅäÅ«È­
+    temp_X = [word for word in temp_X if not word in stopwords] # ºÒ¿ë¾î Á¦°Å
+    X_train.append(temp_X)  
+
+X_test = []
+k = 0
+for sentence in test_data['document']:
+    k = k+1
+    if k % 5000 == 0: print(k)
+    temp_X = []
+    temp_X = okt.morphs(sentence, stem=True) # ÅäÅ«È­
+    temp_X = [word for word in temp_X if not word in stopwords] # ºÒ¿ë¾î Á¦°Å
+    X_test.append(temp_X)
+
+tokenizer = Tokenizer()
+tokenizer.fit_on_texts(X_train)
+
+threshold = 3
+total_cnt = len(tokenizer.word_index) # ´Ü¾îÀÇ ¼ö
+rare_cnt = 0 # µîÀå ºóµµ¼ö°¡ thresholdº¸´Ù ÀÛÀº ´Ü¾îÀÇ °³¼ö¸¦ Ä«¿îÆ®
+total_freq = 0 # ÈÆ·Ã µ¥ÀÌÅÍÀÇ ÀüÃ¼ ´Ü¾î ºóµµ¼ö ÃÑ ÇÕ
+rare_freq = 0 # µîÀå ºóµµ¼ö°¡ thresholdº¸´Ù ÀÛÀº ´Ü¾îÀÇ µîÀå ºóµµ¼öÀÇ ÃÑ ÇÕ
+
+# ´Ü¾î¿Í ºóµµ¼öÀÇ ½Ö(pair)À» key¿Í value·Î ¹Ş´Â´Ù.
+for key, value in tokenizer.word_counts.items():
+    total_freq = total_freq + value
+
+    # ´Ü¾îÀÇ µîÀå ºóµµ¼ö°¡ thresholdº¸´Ù ÀÛÀ¸¸é
+    if(value < threshold):
+        rare_cnt = rare_cnt + 1
+        rare_freq = rare_freq + value
+
+vocab_size = total_cnt - rare_cnt + 1
+
+tokenizer = Tokenizer(vocab_size, oov_token = 'OOV') 
+tokenizer.fit_on_texts(X_train)
+X_train = tokenizer.texts_to_sequences(X_train)
+X_test = tokenizer.texts_to_sequences(X_test)
+
+y_train = np.array(train_data['label'])
+y_test = np.array(test_data['label'])
+
+drop_train = [index for index, sentence in enumerate(X_train) if len(sentence) < 1]
+
+X_train = np.delete(X_train, drop_train, axis=0)
+y_train = np.delete(y_train, drop_train, axis=0)
+print(len(X_train))
+print(len(y_train))
+
+max_len = 30
+X_train = pad_sequences(X_train, maxlen = max_len)
+X_test = pad_sequences(X_test, maxlen = max_len)
+
+'''
+
+from tensorflow.keras.layers import Embedding, Dense, LSTM
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.models import load_model
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+
+embedding_dim = 100
+hidden_units = 128
+
+model = Sequential()
+model.add(Embedding(vocab_size, embedding_dim))
+model.add(LSTM(hidden_units))
+model.add(Dense(1, activation='sigmoid'))
+
+es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=4)
+mc = ModelCheckpoint('best_model.h5', monitor='val_acc', mode='max', verbose=1, save_best_only=True)
+
+model.compile(optimizer='rmsprop', loss='binary_crossentropy', metrics=['acc'])
+history = model.fit(X_train, y_train, epochs=15, callbacks=[es, mc], batch_size=64, validation_split=0.2)
+
+loaded_model = load_model('best_model.h5')
+print("\n Å×½ºÆ® Á¤È®µµ: %.4f" % (loaded_model.evaluate(X_test, y_test)[1]))
+
+'''
+
+from tensorflow.keras.layers import SimpleRNN, Embedding, Dense
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.models import load_model
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+
+model = Sequential()
+model.add(Embedding(vocab_size, 32)) # ÀÓº£µù º¤ÅÍÀÇ Â÷¿øÀº 32
+model.add(SimpleRNN(32)) # RNN ¼¿ÀÇ hidden_size´Â 32
+model.add(Dense(1, activation='sigmoid'))
+
+model.compile(optimizer='rmsprop', loss='binary_crossentropy', metrics=['acc'])
+history = model.fit(X_train, y_train, epochs=15, batch_size=64, validation_split=0.2)
+
+model.summary()
+
+
+loaded_model = load_model('best_model.h5')
+print("\n Å×½ºÆ® Á¤È®µµ: %.4f" % (loaded_model.evaluate(X_test, y_test)[1]))
+
